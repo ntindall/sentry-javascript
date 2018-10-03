@@ -1,4 +1,7 @@
 import { Breadcrumb, SentryEvent, SentryEventHint, Severity, User } from '@sentry/types';
+import { getGlobalObject } from '@sentry/utils/misc';
+
+export type EventProcessor = (event: SentryEvent, hint?: SentryEventHint) => Promise<SentryEvent | null>;
 
 /**
  * Holds additional event information. {@link Scope.applyToEvent} will be
@@ -12,7 +15,7 @@ export class Scope {
   protected scopeListeners: Array<(scope: Scope) => void> = [];
 
   /** Callback list that will be called after {@link applyToEvent}. */
-  protected eventProcessors: Array<(scope: SentryEvent, hint?: SentryEventHint) => Promise<SentryEvent | null>> = [];
+  protected eventProcessors: EventProcessor[] = [];
 
   /** Array of breadcrumbs. */
   protected breadcrumbs: Breadcrumb[] = [];
@@ -38,9 +41,7 @@ export class Scope {
   }
 
   /** Add new event processor that will be called after {@link applyToEvent}. */
-  public addEventProcessor(
-    callback: (scope: SentryEvent, hint?: SentryEventHint) => Promise<SentryEvent | null>,
-  ): Scope {
+  public addEventProcessor(callback: EventProcessor): Scope {
     this.eventProcessors.push(callback);
     return this;
   }
@@ -65,7 +66,7 @@ export class Scope {
    */
   protected async notifyEventProcessors(event: SentryEvent, hint?: SentryEventHint): Promise<SentryEvent | null> {
     let processedEvent: SentryEvent | null = event;
-    for (const processor of this.eventProcessors) {
+    for (const processor of [...getGlobalEventProcessors(), ...this.eventProcessors]) {
       try {
         processedEvent = await processor({ ...processedEvent }, hint);
         if (processedEvent === null) {
@@ -236,4 +237,14 @@ export class Scope {
 
     return this.notifyEventProcessors(event, hint);
   }
+}
+
+function getGlobalEventProcessors(): EventProcessor[] {
+  const global: any = getGlobalObject();
+  global.__SENTRY__.globalEventProcessors = global.__SENTRY__.globalEventProcessors || [];
+  return global.__SENTRY__.globalEventProcessors;
+}
+
+export function addGlobalEventProcessor(callback: EventProcessor): void {
+  getGlobalEventProcessors().push(callback);
 }
